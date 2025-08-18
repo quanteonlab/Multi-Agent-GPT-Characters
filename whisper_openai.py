@@ -5,9 +5,11 @@ from rich import print
 
 class WhisperManager:
     """
-    Uses Whisper on HF: https://huggingface.co/openai/whisper-large-v3
-    - Safe on machines without CUDA (falls back to CPU).
-    - You can override model via env: WHISPER_MODEL=openai/whisper-small
+    Uses Whisper Tiny on HF: https://huggingface.co/openai/whisper-tiny
+    - Much faster and smaller than larger models (~39MB vs ~3GB)
+    - Good accuracy for English speech
+    - Safe on machines without CUDA (falls back to CPU)
+    - Override model via env: WHISPER_MODEL=openai/whisper-small (or base, medium, large-v3)
     """
 
     def __init__(self, language="en", multilingual=False):
@@ -23,12 +25,10 @@ class WhisperManager:
         self.device = torch.device("cuda:0") if use_cuda else torch.device("cpu")
         torch_dtype = torch.float16 if use_cuda else torch.float32
 
-        # Choose model (you can downshift on CPU to speed things up)
-        default_model = "openai/whisper-large-v3"
+        # Choose model - default to tiny for better performance
+        default_model = "openai/whisper-tiny"
         model_id = os.getenv("WHISPER_MODEL", default_model)
-        if not use_cuda and model_id.endswith("large-v3"):
-            print("[yellow]CPU detected; loading a large model may be slow. "
-                  "Set WHISPER_MODEL=openai/whisper-small (or medium) for faster CPU runs.[/yellow]")
+        print(f"[cyan]Loading Whisper model: {model_id}[/cyan]")
 
         # Load model & processor
         model = AutoModelForSpeechSeq2Seq.from_pretrained(
@@ -49,9 +49,9 @@ class WhisperManager:
         # Pipeline device arg: int GPU index for CUDA, or "cpu"
         device_arg = 0 if use_cuda else "cpu"
 
-        # Batch/Chunk sizing tuned per device
-        batch_size = 8 if use_cuda else 1
-        chunk_length_s = 30 if use_cuda else 15
+        # Batch/Chunk sizing optimized for tiny model
+        batch_size = 16 if use_cuda else 4  # Increased for tiny model
+        chunk_length_s = 30 if use_cuda else 20  # Slightly increased for better accuracy
 
         self.pipe = pipeline(
             "automatic-speech-recognition",

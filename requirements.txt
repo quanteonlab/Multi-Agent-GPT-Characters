@@ -1,6 +1,7 @@
 elevenlabs
 Flask
 Flask_SocketIO
+gtts
 keyboard
 mutagen
 obs_websocket_py
@@ -14,5 +15,6 @@ soundfile
 tiktoken
 torch
 transformers
+gTTS
 
 

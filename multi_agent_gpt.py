@@ -64,8 +64,8 @@ from rich import print
 
 from audio_player import AudioManager
 from eleven_labs import ElevenLabsManager
+from local_speech_manager import LocalSpeechManager
 from openai_chat import OpenAiManager
-from whisper_openai import WhisperManager
 from obs_websockets import OBSWebsocketsManager
 from ai_prompts import *
 
@@ -85,14 +85,36 @@ def connect():
     print("[green]The server connected to client!")
 
 obswebsockets_manager = OBSWebsocketsManager()
-whisper_manager = WhisperManager()
-elevenlabs_manager = ElevenLabsManager()
 audio_manager = AudioManager()
+
+# Speech managers - choose between local and ElevenLabs
+use_local_speech = True  # Set to False to use ElevenLabs instead
+
+if use_local_speech:
+    speech_manager = LocalSpeechManager()
+    print("[green]Using local text-to-speech")
+else:
+    speech_manager = ElevenLabsManager()
+    print("[green]Using ElevenLabs text-to-speech")
+
+# Whisper manager - only loaded when needed
+whisper_manager = None
 
 speaking_lock = threading.Lock()
 conversation_lock = threading.Lock()
 
 agents_paused = False
+use_text_input = False  # Set to False to use Whisper audio input instead
+
+def load_whisper_manager():
+    """Lazy load Whisper manager only when needed"""
+    global whisper_manager
+    if whisper_manager is None:
+        print("[yellow]Loading Whisper model for audio transcription...")
+        from whisper_openai import WhisperManager
+        whisper_manager = WhisperManager()
+        print("[green]Whisper model loaded successfully!")
+    return whisper_manager
 
 # Class that represents a single ChatGPT Agent and its information
 class Agent():
@@ -144,10 +166,11 @@ class Agent():
                         agent.openai_manager.save_chat_to_backup()
 
             # Create audio response
-            tts_file = elevenlabs_manager.text_to_audio(openai_answer, self.voice, False)
+            tts_file = speech_manager.text_to_audio(openai_answer, self.voice, False)
 
             # Process the audio to get subtitles
-            audio_and_timestamps = whisper_manager.audio_to_text(tts_file, "sentence")
+            whisper_mgr = load_whisper_manager()
+            audio_and_timestamps = whisper_mgr.audio_to_text(tts_file, "sentence")
 
             # Wait here until the current speaker is finished
             with speaking_lock:
@@ -198,31 +221,44 @@ class Human():
         self.all_agents = all_agents
 
     def run(self):
-        global agents_paused
+        global agents_paused, use_text_input
         while True:
 
-            # Speak into mic and add the dialogue to the chat history
+            # Speak into mic or type text and add the dialogue to the chat history
             if keyboard.is_pressed('num 7'):
 
                 # Toggles "pause" flag - stops other agents from activating additional agents
                 agents_paused = True
                 print(f"[italic red] Agents have been paused")
 
-                # Record mic audio from Doug (until he presses '=')
-                print(f"[italic green] DougDoug has STARTED speaking.")
-                mic_audio = audio_manager.record_audio(end_recording_key='num 8')
+                if use_text_input:
+                    # Text input mode
+                    print(f"[italic green] {self.name} - Type your message (press Enter when done):")
+                    user_input = input("> ")
+                    print(f"[teal]Got the following text from {self.name}:\n{user_input}")
+                    
+                    with conversation_lock:
+                        # Add user's text input into all agents chat history
+                        for agent in self.all_agents:
+                            agent.openai_manager.chat_history.append({"role": "user", "content": f"[{self.name}] {user_input}"})
+                            agent.openai_manager.save_chat_to_backup()
+                else:
+                    # Audio input mode (original Whisper functionality)
+                    print(f"[italic green] {self.name} has STARTED speaking.")
+                    mic_audio = audio_manager.record_audio(end_recording_key='num 8')
 
-                with conversation_lock:
-                    # Transcribe mic audio into text with Whisper
-                    transcribed_audio = whisper_manager.audio_to_text(mic_audio)
-                    print(f"[teal]Got the following audio from Doug:\n{transcribed_audio}")
+                    with conversation_lock:
+                        # Transcribe mic audio into text with Whisper
+                        whisper_mgr = load_whisper_manager()
+                        transcribed_audio = whisper_mgr.audio_to_text(mic_audio)
+                        print(f"[teal]Got the following audio from {self.name}:\n{transcribed_audio}")
 
-                    # Add Doug's response into all agents chat history
-                    for agent in self.all_agents:
-                        agent.openai_manager.chat_history.append({"role": "user", "content": f"[{self.name}] {transcribed_audio}"})
-                        agent.openai_manager.save_chat_to_backup() # Tell the other agents to save their chat history to their backup file
+                        # Add user's response into all agents chat history
+                        for agent in self.all_agents:
+                            agent.openai_manager.chat_history.append({"role": "user", "content": f"[{self.name}] {transcribed_audio}"})
+                            agent.openai_manager.save_chat_to_backup()
                 
-                print(f"[italic magenta] DougDoug has FINISHED speaking.")
+                print(f"[italic magenta] {self.name} has FINISHED speaking.")
 
                 # Activate another agent randomly
                 agents_paused = False
@@ -257,6 +293,25 @@ class Human():
                 print("[cyan]Activating Agent 3")
                 agents_paused = False
                 self.all_agents[2].activated = True
+                time.sleep(1) # Wait for a bit to ensure you don't press this twice in a row
+            
+            # Toggle between text and audio input
+            if keyboard.is_pressed('f5'):
+                use_text_input = not use_text_input
+                mode = "TEXT INPUT" if use_text_input else "AUDIO INPUT (Whisper)"
+                print(f"[yellow]Switched to {mode} mode")
+                time.sleep(1) # Wait for a bit to ensure you don't press this twice in a row
+            
+            # Toggle between local and ElevenLabs speech
+            if keyboard.is_pressed('f6'):
+                global use_local_speech, speech_manager
+                use_local_speech = not use_local_speech
+                if use_local_speech:
+                    speech_manager = LocalSpeechManager()
+                    print(f"[yellow]Switched to LOCAL text-to-speech")
+                else:
+                    speech_manager = ElevenLabsManager()
+                    print(f"[yellow]Switched to ELEVENLABS text-to-speech")
                 time.sleep(1) # Wait for a bit to ensure you don't press this twice in a row
             
             time.sleep(0.05)
@@ -294,7 +349,17 @@ if __name__ == '__main__':
     human_thread = threading.Thread(target=start_bot, args=(human,))
     human_thread.start()
 
-    print("[italic green]!!AGENTS ARE READY TO GO!!\nPress Num 1, Num 2, or Num3 to activate an agent.\nPress F7 to speak to the agents.")
+    input_mode = "TEXT INPUT" if use_text_input else "AUDIO INPUT (Whisper)"
+    speech_mode = "LOCAL TTS" if use_local_speech else "ELEVENLABS TTS"
+    print(f"[italic green]!!AGENTS ARE READY TO GO!!")
+    print(f"[cyan]Input mode: {input_mode}")
+    print(f"[cyan]Speech mode: {speech_mode}")
+    print(f"[white]Controls:")
+    print(f"[white]  Num 1, 2, 3 - Activate Agent 1, 2, or 3")
+    print(f"[white]  Num 7 - Talk to agents ({'type text' if use_text_input else 'record audio until Num 8'})")
+    print(f"[white]  F4 - Pause all agents")
+    print(f"[white]  F5 - Toggle between text/audio input modes")
+    print(f"[white]  F6 - Toggle between local/ElevenLabs speech")
 
     socketio.run(app)
 
