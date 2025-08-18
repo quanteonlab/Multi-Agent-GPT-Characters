@@ -5,6 +5,10 @@ from rich import print
 import base64
 import time
 import json
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 class OpenAiManager:
     

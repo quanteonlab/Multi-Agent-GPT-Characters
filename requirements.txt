@@ -8,8 +8,11 @@ openai
 PyAudio
 pydub
 pygame
+python-dotenv
 rich
 soundfile
 tiktoken
 torch
 transformers
+
+

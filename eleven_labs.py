@@ -12,6 +12,12 @@ class ElevenLabsManager:
         self.voice_to_id = {}
         for voice in self.voices:
            self.voice_to_id[voice.name] = voice.voice_id
+        
+        # Print available voices for debugging
+        print("[cyan]Available ElevenLabs voices:")
+        for voice_name in self.voice_to_id.keys():
+            print(f"[cyan]  - {voice_name}")
+        
         self.voice_to_settings = {}
 
     # Convert text to speech, then save it to file. Returns the file path.
@@ -19,12 +25,37 @@ class ElevenLabsManager:
     # eleven_turbo_v2 takes about 60% of the time that eleven_monolingual_v1 takes
     # However eleven_monolingual_v1 seems to produce more variety and emphasis, whereas turbo feels more monotone. Turbo still sounds good, just a little less interesting
     def text_to_audio(self, input_text, voice="Doug VO Only", save_as_wave=True, subdirectory="", model_id="eleven_monolingual_v1"):
-        # Currently seems to be a problem with the API where it uses default voice settings, rather than pulling the proper settings from the website
-        # Workaround is to get the voice settings for each voice the first time it's used, then pass those settings in manually
-        if voice not in self.voice_to_settings:
-            self.voice_to_settings[voice] = self.client.voices.get_settings(self.voice_to_id[voice])
-        voice_settings = self.voice_to_settings[voice]
-        audio_saved = self.client.generate(text=input_text, voice=Voice(voice_id=self.voice_to_id[voice], settings=voice_settings), model=model_id,)
+        # Check if voice exists
+        if voice not in self.voice_to_id:
+            print(f"[red]ERROR: Voice '{voice}' not found in ElevenLabs account!")
+            print(f"[red]Available voices: {list(self.voice_to_id.keys())}")
+            raise ValueError(f"Voice '{voice}' not found. Available voices: {list(self.voice_to_id.keys())}")
+            
+        # Use the current ElevenLabs API - try multiple method patterns for compatibility
+        try:
+            # Try the newer API method
+            audio_saved = self.client.text_to_speech.convert(
+                voice_id=self.voice_to_id[voice],
+                text=input_text,
+                model_id=model_id
+            )
+        except AttributeError:
+            try:
+                # Try alternative method
+                audio_saved = self.client.generate(
+                    text=input_text,
+                    voice=Voice(voice_id=self.voice_to_id[voice]),
+                    model=model_id
+                )
+            except AttributeError:
+                # Fallback to direct voice ID
+                from elevenlabs import generate
+                audio_saved = generate(
+                    text=input_text,
+                    voice=self.voice_to_id[voice],
+                    model=model_id,
+                    api_key=os.getenv('ELEVENLABS_API_KEY')
+                )
         if save_as_wave:
             file_name = f"___Msg{str(hash(input_text))}{time.time()}_{model_id}.wav"
         else:

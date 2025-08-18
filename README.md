@@ -20,6 +20,19 @@ This is uploaded for educational purposes. Unfortunately I don't have time to of
    pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
    ```
 
+
+  Make sure your ElevenLabs voices are properly configured:
+  - Log into ElevenLabs website
+  - Set up voice settings for your voices there
+  - The API will use those settings automatically
+
+  The voice names in your code should match exactly what you have in ElevenLabs:
+  - "Dougsworth"
+  - "Tony Emperor of New York"
+  - "Victoria"
+
+
+
 5) This uses the OpenAi API and Elevenlabs services. You'll need to set up an account with these services and generate an API key from them. Then add these keys as windows environment variables named OPENAI_API_KEY and ELEVENLABS_API_KEY respectively.
 
 ## Environment Variables
