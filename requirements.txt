@@ -6,6 +6,7 @@ keyboard
 mutagen
 obs_websocket_py
 openai
+sounddevice
 PyAudio
 pydub
 pygame

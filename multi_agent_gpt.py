@@ -179,7 +179,7 @@ class Agent():
                 # Otherwise, pick another agent randomly, then activate it
                 if not agents_paused:
                     other_agents = [agent for agent in self.all_agents if agent is not self]
-                    random_agent = random.choice(other_agents)
+                    random_agent: Agent = random.choice(other_agents)
                     random_agent.activated = True
 
                 # Activate move filter on the image

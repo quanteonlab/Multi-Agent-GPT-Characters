@@ -10,16 +10,17 @@ from pydub import AudioSegment
 
 class SpeechManager:
     """
-    message_queue      ← 由外部(Flask)压入整段文本  
-    process_queue()    ← 在 pygame 主循环里持续调用  
-    speak()            ← 内部使用，把文本拆块并并行生成 MP3
+    message_queue      ← Pushed with full text from external (Flask)
+    process_queue()    ← Called repeatedly in the pygame main loop
+    speak()            ← Used internally, splits text into chunks and generates MP3s in parallel
     """
 
-    def __init__(self, avatar_manager=None, chunk_size: int = 10):
+    def __init__(self, avatar_manager=None, chunk_size: int = 10, speed: float = 1.5):
         self.message_queue: "queue.Queue[str]" = queue.Queue()
 
         self.avatar_manager = avatar_manager
         self.chunk_size = chunk_size
+        self.speed = speed
         self._ready_mp3 = {}               
         self._ready_lock = threading.Lock()
         self._next_play_idx = 0            
@@ -64,16 +65,17 @@ class SpeechManager:
         if pipeline_idle and not self.message_queue.empty():
             self.speak(self.message_queue.get())
 
-    def text_to_audio(self, input_text, voice="default", save_as_wave=True, subdirectory="", model_id="gtts"):
+    def text_to_audio(self, input_text, voice="default", save_as_wave=True, subdirectory="", model_id="gtts", agent_name=None, audio_number=None):
         """
         Compatibility method for the existing codebase.
         Generates audio file and returns the path (to match ElevenLabs interface)
         """
-        # Generate filename similar to ElevenLabs format
-        if save_as_wave:
-            file_name = f"___Msg{str(hash(input_text))}{time.time()}_{model_id}.wav"
-        else:
-            file_name = f"___Msg{str(hash(input_text))}{time.time()}_{model_id}.mp3"
+        # Improved filename: agent_audio_number_datetime
+        timestamp = time.strftime('%Y%m%d_%H%M%S')
+        agent_str = agent_name if agent_name else "agent"
+        audio_num_str = str(audio_number) if audio_number is not None else "audio"
+        ext = "wav" if save_as_wave else "mp3"
+        file_name = f"{agent_str}_audio_{audio_num_str}_{timestamp}.{ext}"
             
         tts_file = os.path.join(os.path.abspath(os.curdir), subdirectory, file_name)
         
@@ -88,6 +90,8 @@ class SpeechManager:
                 audio = AudioSegment.from_file(temp_mp3, format="mp3")
                 audio.export(tts_file, format="wav")
                 
+                
+                
                 # Clean up temp file
                 if os.path.exists(temp_mp3):
                     os.remove(temp_mp3)
@@ -95,6 +99,12 @@ class SpeechManager:
                 # Direct MP3 generation
                 gTTS(text=input_text, lang="en", tld="us").save(tts_file)
             
+            # speedup
+            if not save_as_wave:
+                print(f"[green]Speeding up audio {file_name} by {self.speed}x")
+                audio = AudioSegment.from_file(tts_file, format="mp3")
+                final = audio.speedup(playback_speed=self.speed)
+                final.export(tts_file, format="mp3")
             print(f"[green]Local TTS (gTTS) saved: {file_name}")
             return tts_file
             
@@ -104,7 +114,7 @@ class SpeechManager:
             return tts_file
 
     def speak(self, text: str):
-        """把整段文本切块、并行生成 MP3，并重置播放管线"""
+        """Split the entire text into chunks, generate MP3s in parallel, and reset the playback pipeline"""
         words = text.split()
         chunks = []
         i = 0
@@ -133,14 +143,14 @@ class SpeechManager:
             i = end
             size *= 2
         
-        # 重置流水线
+    # Reset pipeline
         self._ready_mp3.clear()
         self._next_play_idx = 0
         self._total_chunks = len(chunks)
         self._generated_cnt = 0
         self._generating = True
 
-        # 并行生成
+    # Parallel generation
         for idx, chunk in enumerate(chunks):
             threading.Thread(
                 target=self._tts_worker,
@@ -149,19 +159,20 @@ class SpeechManager:
             ).start()
             time.sleep(0.1)  # Avoid overwhelming the system with threads
 
-    def _tts_worker(self, idx: int, text: str):
+    def _tts_worker(self, idx: int, text: str, agent_name=None):
         try:
-            temp_path = f"temp_tts_{idx}.mp3"
-            path = f"tts_{idx}.mp3"
+            timestamp = time.strftime('%Y%m%d_%H%M%S')
+            agent_str = agent_name if agent_name else "agent"
+            temp_path = f"{agent_str}_audio_{idx}_{timestamp}_temp.mp3"
+            path = f"{agent_str}_audio_{idx}_{timestamp}.mp3"
             
             # Generate TTS audio for all chunks
             gTTS(text=text, lang="en", tld="us").save(temp_path)
             
             # Apply speed-up to all chunks
-            speed_to_use = 1.5
-            print(f"[green]Speeding up audio {temp_path} by {speed_to_use}x")
+            print(f"[green]Speeding up audio {temp_path} by {self.speed}x")
             audio = AudioSegment.from_file(temp_path, format="mp3")
-            final = audio.speedup(playback_speed=speed_to_use)
+            final = audio.speedup(playback_speed=self.speed)
             final.export(path, format="mp3")
             
             print('created audio', idx + 1, 'of', self._total_chunks)

@@ -1,78 +1,84 @@
+import wave
+import pyaudio
 import pygame
+from pydub import AudioSegment
+from mutagen.mp3 import MP3
 import time
 import os
 import asyncio
 import subprocess
 import threading
-import keyboard
-import wave
-import pyaudio
+import sounddevice as sd
 import soundfile as sf
-from mutagen.mp3 import MP3
-from pydub import AudioSegment
-from rich import print
+import keyboard
+import numpy as np
+
 
 class AudioManager:
-
-    # Variables for recording audio from mic
-    is_recording = False
-    audio_frames = []
-    audio_format = pyaudio.paInt16
-    channels = 2
-    rate = 44100
-    chunk = 1024
-
     def __init__(self):
-        # Use higher frequency to prevent audio glitching noises
-        # Use higher buffer because why not (default is 512)
-        pygame.mixer.init(frequency=48000, buffer=1024) 
+        pass
 
-    def play_audio(self, file_path, sleep_during_playback=True, delete_file=False, play_using_music=True):
+    def play_audio(self, audio_path, block=True, fade_in=False, use_pygame=True):
         """
-        Parameters:
-        file_path (str): path to the audio file
-        sleep_during_playback (bool): means program will wait for length of audio file before returning
-        delete_file (bool): means file is deleted after playback (note that this shouldn't be used for multithreaded function calls)
-        play_using_music (bool): means it will use Pygame Music, if false then uses pygame Sound instead
+        Play an audio file using pygame or another method.
         """
-        if not pygame.mixer.get_init(): # Reinitialize mixer if needed
-            pygame.mixer.init(frequency=48000, buffer=1024) 
-        if play_using_music:
-            # Pygame Music can only play one file at a time
-            try:
-                pygame.mixer.music.load(file_path)
-                pygame.mixer.music.play()
-                converted = False
-            except:
-                # Wav files from Elevenlabs don't work with Pygame's Music for some fucking reason (works fine with Sound)
-                # If there's an error here that's likely why, so convert it to a format that Pygame can handle
-                # You can't convert the file in place so just convert it into a temp file that you delete later
-                converted_wav = "temp_convert.wav"
-                subprocess.run(["ffmpeg", "-y", "-i", file_path, "-ar", "48000", "-ac", "2", "-c:a", "pcm_s16le", converted_wav])
-                converted = True
-                pygame.mixer.music.load(converted_wav)
-                pygame.mixer.music.play()
+        if use_pygame:
+            import pygame.mixer
+            pygame.mixer.init()
+            sound = pygame.mixer.Sound(audio_path)
+            if fade_in:
+                sound.play(fade_ms=1000)
+            else:
+                sound.play()
+            if block:
+                while pygame.mixer.get_busy():
+                    time.sleep(0.1)
         else:
-            # Pygame Sound lets you play multiple sounds simultaneously
-            pygame_sound = pygame.mixer.Sound(file_path) 
-            pygame_sound.play()
+            # Implement other playback methods if needed
+            pass
 
-        if sleep_during_playback:
-            # Sleep until file is done playing
-            file_length = self.get_audio_length(file_path)
-            time.sleep(file_length)
-            # Delete the file
-            if delete_file:
-                # Stop Pygame so file can be deleted
-                # Note: this will stop the audio on other threads as well, so it's not good if you're playing multiple sounds at once
-                pygame.mixer.music.stop()
-                pygame.mixer.quit()
-                try:  
-                    os.remove(file_path)
-                    if converted:
-                        os.remove(converted_wav) # Remove the converted wav if it was created
-                except PermissionError:
-                    print(f"Couldn't remove {file_path} because it is being used by another process.")
+    def record_audio(self, end_recording_key='num 8', agent_name=None, audio_number=None, subdirectory=""):
+        """
+        Record audio from the microphone and save it to a file with improved naming.
+        """
+        samplerate = 44100
+        channels = 1
+        print("[green]Recording... Press {} to stop.".format(end_recording_key))
+        recording = []
+        while not keyboard.is_pressed(end_recording_key):
+            data = sd.rec(int(samplerate * 0.5), samplerate=samplerate, channels=channels, dtype='float32')
+            sd.wait()
+            recording.append(data)
+        audio = np.concatenate(recording, axis=0)
+        timestamp = time.strftime('%Y%m%d_%H%M%S')
+        agent_str = agent_name if agent_name else "agent"
+        audio_num_str = str(audio_number) if audio_number is not None else "audio"
+        file_name = f"{agent_str}_audio_{audio_num_str}_{timestamp}.wav"
+        audio_path = os.path.join(os.path.abspath(os.curdir), subdirectory, file_name)
+        sf.write(audio_path, audio, samplerate)
+        print(f"[green]Audio recorded and saved as: {file_name}")
+        return audio_path
+        # else:
+        #     # Pygame Sound lets you play multiple sounds simultaneously
+        #     pygame_sound = pygame.mixer.Sound(file_path) 
+        #     pygame_sound.play()
+
+        # if sleep_during_playback:
+        #     # Sleep until file is done playing
+        #     file_length = self.get_audio_length(file_path)
+        #     time.sleep(file_length)
+        #     # Delete the file
+        #     if delete_file:
+        #         # Stop Pygame so file can be deleted
+        #         # Note: this will stop the audio on other threads as well, so it's not good if you're playing multiple sounds at once
+        #         pygame.mixer.music.stop()
+        #         pygame.mixer.quit()
+        #         try:  
+        #             os.remove(file_path)
+        #             if converted:
+        #                 os.remove(converted_wav) # Remove the converted wav if it was created
+        #         except PermissionError:
+        #             print(f"Couldn't remove {file_path} because it is being used by another process.")
 
     async def play_audio_async(self, file_path):
         """
